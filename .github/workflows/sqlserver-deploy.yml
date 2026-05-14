@@ -43,10 +43,10 @@ jobs:
           }
 
   # ==========================================
-  # JOB 2 — Flyway Deployment
+  # JOB 2 — Deploy Databases
   # ==========================================
   deploy-production:
-    name: Deploy Databases
+    name: Deploy to Production
     runs-on: self-hosted
     needs: validate
     environment: Production
@@ -78,27 +78,23 @@ jobs:
           }
 
           # ======================================
-          # SQL SERVER CONFIG (IMPORTANT FIX)
+          # SQL SERVER CONFIG
           # ======================================
           $server = "localhost"
-
-          # IMPORTANT:
-          # Replace this with ACTUAL SQL PORT from SQL Server
-          # If port is NULL, you MUST set a real one (e.g., 49172 or 1433 after config fix)
           $sqlPort = "1433"
 
           # ======================================
-          # CHECK CONNECTION BEFORE FLYWAY
+          # CHECK SQL SERVER CONNECTION
           # ======================================
           Write-Host "Checking SQL Server connectivity..."
 
           $test = Test-NetConnection -ComputerName $server -Port $sqlPort -WarningAction SilentlyContinue
 
           if (-not $test.TcpTestSucceeded) {
-            Write-Error "SQL Server NOT reachable on $server:$sqlPort"
+            Write-Error "SQL Server NOT reachable on ${server}:${sqlPort}"
             Write-Host "Fix required:"
             Write-Host "1. Enable TCP/IP in SQL Server Configuration Manager"
-            Write-Host "2. Set fixed port OR use correct dynamic port"
+            Write-Host "2. Set correct port (avoid NULL dynamic port)"
             Write-Host "3. Restart SQL Server service"
             exit 1
           }
@@ -126,6 +122,7 @@ jobs:
               exit 1
             }
 
+            # FIXED: safe PowerShell string formatting
             $url = "jdbc:sqlserver://$server`:$sqlPort;databaseName=$db;encrypt=false;trustServerCertificate=true;loginTimeout=30"
 
             Write-Host ""
