@@ -68,14 +68,26 @@ jobs:
           Write-Host "======================================="
 
           # ======================================
-          # Flyway Path
+          # AUTO-DETECT FLYWAY PATH (FIX)
           # ======================================
-          $flyway = "C:\Users\tr117372\flyway\flyway-10.15.0\flyway.cmd"
 
-          if (-not (Test-Path $flyway)) {
-            Write-Error "Flyway not found!"
+          $flywayBase = "C:\Users\tr117372\flyway\flyway\flyway-10.15.0"
+
+          $flyway = "$flywayBase\flyway.cmd"
+          $flywayBin = "$flywayBase\bin\flyway.cmd"
+
+          if (Test-Path $flyway) {
+            $flywayCmd = $flyway
+          }
+          elseif (Test-Path $flywayBin) {
+            $flywayCmd = $flywayBin
+          }
+          else {
+            Write-Error "Flyway not found in expected locations!"
             exit 1
           }
+
+          Write-Host "Using Flyway: $flywayCmd"
 
           # ======================================
           # SQL SERVER CONFIG
@@ -94,7 +106,7 @@ jobs:
             Write-Error "SQL Server NOT reachable on ${server}:${sqlPort}"
             Write-Host "Fix required:"
             Write-Host "1. Enable TCP/IP in SQL Server Configuration Manager"
-            Write-Host "2. Set correct port (avoid NULL dynamic port)"
+            Write-Host "2. Ensure correct port is configured"
             Write-Host "3. Restart SQL Server service"
             exit 1
           }
@@ -122,7 +134,6 @@ jobs:
               exit 1
             }
 
-            # FIXED: safe PowerShell string formatting
             $url = "jdbc:sqlserver://$server`:$sqlPort;databaseName=$db;encrypt=false;trustServerCertificate=true;loginTimeout=30"
 
             Write-Host ""
@@ -131,7 +142,7 @@ jobs:
             Write-Host "Path         : $path"
             Write-Host "--------------------------------------"
 
-            & $flyway `
+            & $flywayCmd `
               -url="$url" `
               -user="$env:DB_USER" `
               -password="$env:DB_PASS" `
