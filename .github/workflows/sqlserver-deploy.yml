@@ -21,30 +21,17 @@ jobs:
         shell: powershell
         run: |
 
-          Write-Host "======================================="
-          Write-Host "VALIDATING SQL STRUCTURE"
-          Write-Host "======================================="
-
           if (-not (Test-Path "./sql")) {
             Write-Error "sql folder missing!"
             exit 1
           }
 
-          $folders = Get-ChildItem "./sql" -Directory
+          Write-Host "SQL folder OK"
 
-          if ($folders.Count -eq 0) {
-            Write-Error "No database folders found!"
-            exit 1
-          }
-
-          Write-Host "Database folders found:"
-          $folders | ForEach-Object { Write-Host " - $($_.Name)" }
-
-  deploy-production:
-    name: Deploy to Production
+  deploy:
+    name: Deploy Databases
     runs-on: self-hosted
     needs: validate
-    environment: Production
 
     steps:
 
@@ -66,57 +53,25 @@ jobs:
           # =========================
           # FLYWAY PATH
           # =========================
+          $flyway = "C:\Users\tr117372\flyway\flyway\flyway-10.15.0\flyway.cmd"
 
-          $flywayBase = "C:\Users\tr117372\flyway\flyway\flyway-10.15.0"
-          $flywayCmd = "$flywayBase\flyway.cmd"
-
-          if (-not (Test-Path $flywayCmd)) {
+          if (-not (Test-Path $flyway)) {
             Write-Error "Flyway not found!"
             exit 1
           }
 
-          Write-Host "Using Flyway: $flywayCmd"
+          Write-Host "Using Flyway: $flyway"
 
           # =========================
-          # SQL SERVER (FIXED)
+          # SQL SERVER (YOUR REQUESTED SERVER)
           # =========================
+          $server = "BCTCL-DL5420628\SQLDBMIG"
 
-          $server = "localhost"
-
-          Write-Host ""
-          Write-Host "Detecting SQL Server port..."
-
-          $connection = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
-                        Where-Object {
-                          $_.OwningProcess -in (Get-Process sqlservr -ErrorAction SilentlyContinue).Id
-                        }
-
-          if (-not $connection) {
-            Write-Error "SQL Server not running or port not found."
-            exit 1
-          }
-
-          $sqlPort = ($connection.LocalPort | Sort-Object -Unique | Select-Object -First 1)
-
-          Write-Host "Detected SQL Server Port: $sqlPort"
-
-          # =========================
-          # TEST CONNECTION
-          # =========================
-
-          $test = Test-NetConnection -ComputerName $server -Port $sqlPort -WarningAction SilentlyContinue
-
-          if (-not $test.TcpTestSucceeded) {
-            Write-Error "SQL Server NOT reachable on localhost:$sqlPort"
-            exit 1
-          }
-
-          Write-Host "SQL Server connection OK."
+          Write-Host "Using SQL Server Instance: $server"
 
           # =========================
           # DATABASE MAP
           # =========================
-
           $dbMap = @{
             "TESTDB1" = ".\sql\TESTDB1"
             "TESTDB2" = ".\sql\TESTDB2"
@@ -124,9 +79,8 @@ jobs:
           }
 
           # =========================
-          # DEPLOY
+          # DEPLOY LOOP
           # =========================
-
           foreach ($db in $dbMap.Keys) {
 
             $path = $dbMap[$db]
@@ -136,16 +90,17 @@ jobs:
               exit 1
             }
 
-            $url = "jdbc:sqlserver://localhost:$sqlPort;databaseName=$db;encrypt=false;trustServerCertificate=true"
+            # IMPORTANT: named instance format for Flyway JDBC
+            $url = "jdbc:sqlserver://$server;databaseName=$db;encrypt=false;trustServerCertificate=true"
 
             Write-Host ""
             Write-Host "---------------------------------------"
             Write-Host "Deploying Database : $db"
-            Write-Host "Port               : $sqlPort"
+            Write-Host "Server             : $server"
             Write-Host "Path               : $path"
             Write-Host "---------------------------------------"
 
-            & $flywayCmd `
+            & $flyway `
               -X `
               -url="$url" `
               -user="$env:DB_USER" `
@@ -167,7 +122,6 @@ jobs:
       - name: Deployment Completed
         shell: powershell
         run: |
-
           Write-Host "======================================="
           Write-Host "ALL DATABASES DEPLOYED SUCCESSFULLY"
           Write-Host "======================================="
