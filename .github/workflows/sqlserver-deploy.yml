@@ -1,0 +1,95 @@
+name: SQL Server Multi-DB Deployment
+
+on:
+  push:
+    branches:
+      - Development
+
+  workflow_dispatch:
+
+jobs:
+
+  # ✅ JOB 1 — Validation
+  validate:
+    name: Validate Scripts
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Check SQL Folders
+        run: |
+          if (-not (Test-Path "./sql")) {
+            Write-Error "sql folder missing!"
+            exit 1
+          }
+
+          Write-Host "Listing SQL folders:"
+          Get-ChildItem "./sql" -Directory | ForEach-Object {
+            Write-Host " -> $($_.Name)"
+          }
+
+  # ✅ JOB 2 — Approval + Deployment
+  deploy-production:
+    name: Deploy to Production
+    runs-on: self-hosted
+    needs: validate
+    environment: Production   # ✅ approval required
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Multiple Databases
+        env:
+          DB_USER: ${{ secrets.SQLUSER }}
+          DB_PASS: ${{ secrets.SQLPASSWORD }}
+        run: |
+
+          # ✅ Local Flyway path
+          $flyway = "C:\Users\tr117372\flyway\flyway\flyway-10.15.0\flyway.cmd"
+
+          # ✅ Your SQL Server (INSTANCE BASED - NO PORT)
+          $server = "BCTCL-DL5420628"
+          $instance = "SQLDBMIG"
+
+          # ✅ DB → Script mapping
+          $dbMap = @{
+            "TESTDB1" = ".\sql\TESTDB1"
+            "TESTDB2" = ".\sql\TESTDB2"
+            "TESTDB3" = ".\sql\TESTDB3"
+          }
+
+          foreach ($db in $dbMap.Keys) {
+
+            $path = $dbMap[$db]
+
+            # ✅ FINAL JDBC URL (NO ADMIN REQUIRED)
+            $url = "jdbc:sqlserver://$server;instanceName=$instance;databaseName=$db;encrypt=false;trustServerCertificate=true"
+
+            Write-Host ""
+            Write-Host "======================================"
+            Write-Host "Deploying to Database: $db"
+            Write-Host "Scripts Path: $path"
+            Write-Host "======================================"
+
+            & $flyway -X `
+              -url="$url" `
+              -user="$env:DB_USER" `
+              -password="$env:DB_PASS" `
+              -locations="filesystem:$path" `
+              -validateOnMigrate=true `
+              migrate
+
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "❌ Deployment FAILED for $db"
+              exit 1
+            }
+
+            Write-Host "✅ Deployment SUCCESS for $db"
+          }
+
+      - name: Final Message
+        run: |
+          Write-Host "✅ ALL DATABASES DEPLOYED SUCCESSFULLY"
