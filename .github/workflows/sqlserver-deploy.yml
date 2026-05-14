@@ -30,8 +30,6 @@ jobs:
             exit 1
           }
 
-          Write-Host "SQL folder found."
-
           $folders = Get-ChildItem "./sql" -Directory
 
           if ($folders.Count -eq 0) {
@@ -39,16 +37,8 @@ jobs:
             exit 1
           }
 
-          Write-Host ""
-          Write-Host "Detected Database Folders:"
-          Write-Host "---------------------------------------"
-
-          foreach ($folder in $folders) {
-            Write-Host " -> $($folder.Name)"
-          }
-
-          Write-Host "---------------------------------------"
-          Write-Host "Validation completed successfully."
+          Write-Host "Database folders found:"
+          $folders | ForEach-Object { Write-Host " - $($_.Name)" }
 
   deploy-production:
     name: Deploy to Production
@@ -73,40 +63,59 @@ jobs:
           Write-Host "STARTING MULTI-DB DEPLOYMENT"
           Write-Host "======================================="
 
-          # ======================================
+          # =========================
           # FLYWAY PATH
-          # ======================================
+          # =========================
 
           $flywayBase = "C:\Users\tr117372\flyway\flyway\flyway-10.15.0"
+          $flywayCmd = "$flywayBase\flyway.cmd"
 
-          $flyway = "$flywayBase\flyway.cmd"
-          $flywayBin = "$flywayBase\bin\flyway.cmd"
-
-          if (Test-Path $flyway) {
-            $flywayCmd = $flyway
-          }
-          elseif (Test-Path $flywayBin) {
-            $flywayCmd = $flywayBin
-          }
-          else {
+          if (-not (Test-Path $flywayCmd)) {
             Write-Error "Flyway not found!"
             exit 1
           }
 
           Write-Host "Using Flyway: $flywayCmd"
 
-          # ======================================
-          # SQL SERVER INSTANCE
-          # ======================================
+          # =========================
+          # SQL SERVER (FIXED)
+          # =========================
 
-          $server = ".\SQLDBMIG"
+          $server = "localhost"
 
           Write-Host ""
-          Write-Host "Using SQL Server Instance: $server"
+          Write-Host "Detecting SQL Server port..."
 
-          # ======================================
+          $connection = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+                        Where-Object {
+                          $_.OwningProcess -in (Get-Process sqlservr -ErrorAction SilentlyContinue).Id
+                        }
+
+          if (-not $connection) {
+            Write-Error "SQL Server not running or port not found."
+            exit 1
+          }
+
+          $sqlPort = ($connection.LocalPort | Sort-Object -Unique | Select-Object -First 1)
+
+          Write-Host "Detected SQL Server Port: $sqlPort"
+
+          # =========================
+          # TEST CONNECTION
+          # =========================
+
+          $test = Test-NetConnection -ComputerName $server -Port $sqlPort -WarningAction SilentlyContinue
+
+          if (-not $test.TcpTestSucceeded) {
+            Write-Error "SQL Server NOT reachable on localhost:$sqlPort"
+            exit 1
+          }
+
+          Write-Host "SQL Server connection OK."
+
+          # =========================
           # DATABASE MAP
-          # ======================================
+          # =========================
 
           $dbMap = @{
             "TESTDB1" = ".\sql\TESTDB1"
@@ -114,9 +123,9 @@ jobs:
             "TESTDB3" = ".\sql\TESTDB3"
           }
 
-          # ======================================
-          # DEPLOY DATABASES
-          # ======================================
+          # =========================
+          # DEPLOY
+          # =========================
 
           foreach ($db in $dbMap.Keys) {
 
@@ -127,13 +136,13 @@ jobs:
               exit 1
             }
 
-            $url = "jdbc:sqlserver://$server;databaseName=$db;encrypt=false;trustServerCertificate=true"
+            $url = "jdbc:sqlserver://localhost:$sqlPort;databaseName=$db;encrypt=false;trustServerCertificate=true"
 
             Write-Host ""
             Write-Host "---------------------------------------"
             Write-Host "Deploying Database : $db"
-            Write-Host "SQL Instance       : $server"
-            Write-Host "Migration Path     : $path"
+            Write-Host "Port               : $sqlPort"
+            Write-Host "Path               : $path"
             Write-Host "---------------------------------------"
 
             & $flywayCmd `
@@ -159,7 +168,6 @@ jobs:
         shell: powershell
         run: |
 
-          Write-Host ""
           Write-Host "======================================="
           Write-Host "ALL DATABASES DEPLOYED SUCCESSFULLY"
           Write-Host "======================================="
