@@ -17,19 +17,32 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Validate SQL Folder
+      - name: Validate SQL Structure
         shell: powershell
         run: |
+
+          Write-Host "======================================="
+          Write-Host "VALIDATING SQL FOLDERS"
+          Write-Host "======================================="
 
           if (-not (Test-Path "./sql")) {
             Write-Error "sql folder missing!"
             exit 1
           }
 
-          Write-Host "SQL folder OK"
+          $folders = Get-ChildItem "./sql" -Directory
+
+          if ($folders.Count -eq 0) {
+            Write-Error "No database folders found!"
+            exit 1
+          }
+
+          $folders | ForEach-Object {
+            Write-Host "Found DB Folder: $($_.Name)"
+          }
 
   deploy:
-    name: Deploy Databases
+    name: Deploy Databases via Flyway
     runs-on: self-hosted
     needs: validate
 
@@ -63,11 +76,24 @@ jobs:
           Write-Host "Using Flyway: $flyway"
 
           # =========================
-          # SQL SERVER (YOUR REQUESTED SERVER)
+          # SQL SERVER (FIXED - STABLE MODE)
           # =========================
-          $server = "BCTCL-DL5420628\SQLDBMIG"
+          $server = "localhost"
+          $sqlPort = 52969
 
-          Write-Host "Using SQL Server Instance: $server"
+          Write-Host "Using SQL Server: $server:$sqlPort"
+
+          # =========================
+          # TEST CONNECTION
+          # =========================
+          $test = Test-NetConnection -ComputerName $server -Port $sqlPort -WarningAction SilentlyContinue
+
+          if (-not $test.TcpTestSucceeded) {
+            Write-Error "SQL Server NOT reachable on localhost:$sqlPort"
+            exit 1
+          }
+
+          Write-Host "SQL Server connection OK."
 
           # =========================
           # DATABASE MAP
@@ -90,13 +116,11 @@ jobs:
               exit 1
             }
 
-            # IMPORTANT: named instance format for Flyway JDBC
-            $url = "jdbc:sqlserver://$server;databaseName=$db;encrypt=false;trustServerCertificate=true"
+            $url = "jdbc:sqlserver://localhost:$sqlPort;databaseName=$db;encrypt=false;trustServerCertificate=true"
 
             Write-Host ""
             Write-Host "---------------------------------------"
             Write-Host "Deploying Database : $db"
-            Write-Host "Server             : $server"
             Write-Host "Path               : $path"
             Write-Host "---------------------------------------"
 
@@ -122,6 +146,7 @@ jobs:
       - name: Deployment Completed
         shell: powershell
         run: |
+
           Write-Host "======================================="
           Write-Host "ALL DATABASES DEPLOYED SUCCESSFULLY"
           Write-Host "======================================="
