@@ -9,7 +9,7 @@ on:
 
 jobs:
 
-  # ✅ JOB 1 — Validation
+  # ✅ JOB 1 — Validate Scripts
   validate:
     name: Validate Scripts
     runs-on: self-hosted
@@ -21,11 +21,11 @@ jobs:
       - name: Check SQL Folder
         run: |
           if (-not (Test-Path "./sql")) {
-            Write-Error "❌ sql folder missing!"
+            Write-Error "sql folder missing!"
             exit 1
           }
 
-          Write-Host "📂 Listing SQL folders:"
+          Write-Host "Listing SQL folders:"
           Get-ChildItem "./sql" -Directory | ForEach-Object {
             Write-Host " -> $($_.Name)"
           }
@@ -35,7 +35,7 @@ jobs:
     name: Deploy to Production
     runs-on: self-hosted
     needs: validate
-    environment: Production   # ✅ Manager Approval Required
+    environment: Production   # ✅ Enables approval
 
     steps:
       - name: Checkout Code
@@ -47,12 +47,12 @@ jobs:
           DB_PASS: ${{ secrets.SQLPASSWORD }}
         run: |
 
-          Write-Host "🚀 Starting Multi-DB Deployment..."
+          Write-Host "Starting Multi-DB Deployment"
 
-          # ✅ Local Flyway Path
+          # ✅ Flyway path
           $flyway = "C:\Users\tr117372\flyway\flyway\flyway-10.15.0\flyway.cmd"
 
-          # ✅ DATABASE → SCRIPT MAPPING
+          # ✅ Database mapping
           $dbMap = @{
             "TESTDB1" = ".\sql\TESTDB1"
             "TESTDB2" = ".\sql\TESTDB2"
@@ -63,14 +63,14 @@ jobs:
 
             $path = $dbMap[$db]
 
-            # ✅ FINAL CONNECTION STRING (NO ADMIN REQUIRED ✅)
+            # ✅ FINAL FIX — WORKS WITHOUT ADMIN
             $url = "jdbc:sqlserver://localhost\\SQLDBMIG;databaseName=$db;encrypt=false;trustServerCertificate=true"
 
             Write-Host ""
-            Write-Host "======================================"
+            Write-Host "--------------------------------------"
             Write-Host "Deploying to Database: $db"
-            Write-Host "Scripts location: $path"
-            Write-Host "======================================"
+            Write-Host "Scripts Path: $path"
+            Write-Host "--------------------------------------"
 
             & $flyway -X `
               -url="$url" `
@@ -81,14 +81,13 @@ jobs:
               migrate
 
             if ($LASTEXITCODE -ne 0) {
-              Write-Error "❌ Deployment FAILED for $db"
+              Write-Error "Deployment FAILED for $db"
               exit 1
             }
 
-            Write-Host "✅ Deployment SUCCESS for $db"
+            Write-Host "SUCCESS for $db"
           }
 
       - name: Final Message
         run: |
-          Write-Host ""
-          Write-Host "✅ ALL DATABASES DEPLOYED SUCCESSFULLY"
+          Write-Host "ALL DATABASES DEPLOYED SUCCESSFULLY"
