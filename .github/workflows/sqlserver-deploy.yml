@@ -21,6 +21,10 @@ jobs:
         shell: powershell
         run: |
 
+          Write-Host "======================================="
+          Write-Host "VALIDATING SQL STRUCTURE"
+          Write-Host "======================================="
+
           if (-not (Test-Path "./sql")) {
             Write-Error "sql folder missing!"
             exit 1
@@ -35,9 +39,16 @@ jobs:
             exit 1
           }
 
+          Write-Host ""
+          Write-Host "Detected Database Folders:"
+          Write-Host "---------------------------------------"
+
           foreach ($folder in $folders) {
             Write-Host " -> $($folder.Name)"
           }
+
+          Write-Host "---------------------------------------"
+          Write-Host "Validation completed successfully."
 
   deploy-production:
     name: Deploy to Production
@@ -46,6 +57,7 @@ jobs:
     environment: Production
 
     steps:
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -61,9 +73,10 @@ jobs:
           Write-Host "STARTING MULTI-DB DEPLOYMENT"
           Write-Host "======================================="
 
-          # =======================================
-          # Flyway Path (FIXED)
           # ======================================
+          # FLYWAY PATH
+          # ======================================
+
           $flywayBase = "C:\Users\tr117372\flyway\flyway\flyway-10.15.0"
 
           $flyway = "$flywayBase\flyway.cmd"
@@ -83,29 +96,50 @@ jobs:
           Write-Host "Using Flyway: $flywayCmd"
 
           # ======================================
-          # AUTO-DETECT SQL SERVER PORT (FIX)
+          # AUTO-DETECT SQL SERVER PORT
           # ======================================
 
           $server = "localhost"
 
+          Write-Host ""
           Write-Host "Detecting SQL Server port..."
 
           $connection = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
-                        Where-Object { $_.OwningProcess -in (Get-Process sqlservr -ErrorAction SilentlyContinue).Id }
+                        Where-Object {
+                          $_.OwningProcess -in (
+                            Get-Process sqlservr -ErrorAction SilentlyContinue
+                          ).Id
+                        }
 
           if (-not $connection) {
             Write-Error "Unable to detect SQL Server port. Ensure SQL Server is running."
             exit 1
           }
 
-          $sqlPort = $connection.LocalPort
+          $sqlPort = (
+            $connection.LocalPort |
+            Sort-Object -Unique |
+            Select-Object -First 1
+          )
+
+          if (-not $sqlPort) {
+            Write-Error "No SQL Server port detected."
+            exit 1
+          }
 
           Write-Host "Detected SQL Server Port: $sqlPort"
 
           # ======================================
-          # TEST CONNECTION
+          # TEST SQL CONNECTION
           # ======================================
-          $test = Test-NetConnection -ComputerName $server -Port $sqlPort -WarningAction SilentlyContinue
+
+          Write-Host ""
+          Write-Host "Testing SQL Server connectivity..."
+
+          $test = Test-NetConnection `
+                    -ComputerName $server `
+                    -Port $sqlPort `
+                    -WarningAction SilentlyContinue
 
           if (-not $test.TcpTestSucceeded) {
             Write-Error "SQL Server NOT reachable on ${server}:${sqlPort}"
@@ -117,6 +151,7 @@ jobs:
           # ======================================
           # DATABASE MAP
           # ======================================
+
           $dbMap = @{
             "TESTDB1" = ".\sql\TESTDB1"
             "TESTDB2" = ".\sql\TESTDB2"
@@ -124,8 +159,9 @@ jobs:
           }
 
           # ======================================
-          # DEPLOY
+          # DEPLOY DATABASES
           # ======================================
+
           foreach ($db in $dbMap.Keys) {
 
             $path = $dbMap[$db]
@@ -138,12 +174,14 @@ jobs:
             $url = "jdbc:sqlserver://$server`:$sqlPort;databaseName=$db;encrypt=false;trustServerCertificate=true;loginTimeout=30"
 
             Write-Host ""
-            Write-Host "--------------------------------------"
-            Write-Host "Deploying DB : $db"
-            Write-Host "Port         : $sqlPort"
-            Write-Host "--------------------------------------"
+            Write-Host "---------------------------------------"
+            Write-Host "Deploying Database : $db"
+            Write-Host "SQL Port           : $sqlPort"
+            Write-Host "Migration Path     : $path"
+            Write-Host "---------------------------------------"
 
             & $flywayCmd `
+              -X `
               -url="$url" `
               -user="$env:DB_USER" `
               -password="$env:DB_PASS" `
@@ -154,16 +192,18 @@ jobs:
               migrate
 
             if ($LASTEXITCODE -ne 0) {
-              Write-Error "FAILED for $db"
+              Write-Error "Flyway migration FAILED for $db"
               exit 1
             }
 
-            Write-Host "SUCCESS: $db"
+            Write-Host "SUCCESS: $db deployed successfully."
           }
 
       - name: Deployment Completed
         shell: powershell
         run: |
+
+          Write-Host ""
           Write-Host "======================================="
           Write-Host "ALL DATABASES DEPLOYED SUCCESSFULLY"
           Write-Host "======================================="
