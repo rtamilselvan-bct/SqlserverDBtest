@@ -17,11 +17,12 @@ jobs:
     runs-on: self-hosted
 
     steps:
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Validate SQL Folder
-        shell: pwsh
+        shell: powershell
         run: |
 
           if (-not (Test-Path "./sql")) {
@@ -46,7 +47,7 @@ jobs:
           }
 
   # ==========================================
-  # JOB 2 — Production Deployment
+  # JOB 2 — Deploy Databases
   # ==========================================
   deploy-production:
     name: Deploy to Production
@@ -60,7 +61,8 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Execute Flyway Migration
-        shell: pwsh
+        shell: powershell
+
         env:
           DB_USER: ${{ secrets.SQLUSER }}
           DB_PASS: ${{ secrets.SQLPASSWORD }}
@@ -84,8 +86,9 @@ jobs:
           }
 
           # ======================================
-          # SQL Server Port
-          # Replace 1433 with your actual port
+          # SQL Server TCP Port
+          # Replace if your SQL Server uses
+          # a different TCP port
           # ======================================
 
           $sqlPort = "1433"
@@ -101,7 +104,7 @@ jobs:
           }
 
           # ======================================
-          # Execute Flyway Deployment
+          # Execute Deployment
           # ======================================
 
           foreach ($db in $dbMap.Keys) {
@@ -109,21 +112,21 @@ jobs:
             $path = $dbMap[$db]
 
             if (-not (Test-Path $path)) {
-              Write-Error "Migration path missing for $db"
+              Write-Error "Migration folder missing for $db"
               exit 1
             }
 
             # ======================================
-            # JDBC URL USING TCP PORT
+            # JDBC URL
             # ======================================
 
-            $url = "jdbc:sqlserver://localhost:$sqlPort;databaseName=$db;encrypt=false;trustServerCertificate=true;loginTimeout=30"
+            $url = "jdbc:sqlserver://localhost`:$sqlPort;databaseName=$db;encrypt=false;trustServerCertificate=true;loginTimeout=30"
 
             Write-Host ""
-            Write-Host "---------------------------------------"
-            Write-Host "DATABASE : $db"
-            Write-Host "LOCATION : $path"
-            Write-Host "---------------------------------------"
+            Write-Host "--------------------------------------"
+            Write-Host "Deploying Database : $db"
+            Write-Host "Scripts Path       : $path"
+            Write-Host "--------------------------------------"
 
             & $flyway `
               -url="$url" `
@@ -137,15 +140,21 @@ jobs:
               migrate
 
             if ($LASTEXITCODE -ne 0) {
-              Write-Error "Deployment FAILED for $db"
+
+              Write-Host ""
+              Write-Host "======================================="
+              Write-Host "DEPLOYMENT FAILED FOR $db"
+              Write-Host "======================================="
+
               exit 1
             }
 
+            Write-Host ""
             Write-Host "SUCCESSFULLY DEPLOYED : $db"
           }
 
       - name: Deployment Completed
-        shell: pwsh
+        shell: powershell
         run: |
 
           Write-Host ""
