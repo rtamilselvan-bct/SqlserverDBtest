@@ -9,75 +9,131 @@ on:
 
 jobs:
 
-  # ✅ JOB 1 — Validate Scripts
+  # ==========================================
+  # JOB 1 — Validate SQL Scripts
+  # ==========================================
   validate:
-    name: Validate Scripts
+    name: Validate SQL Scripts
     runs-on: self-hosted
 
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Check SQL Folder
+      - name: Validate SQL Folder
+        shell: pwsh
         run: |
+
           if (-not (Test-Path "./sql")) {
             Write-Error "sql folder missing!"
             exit 1
           }
 
-          Write-Host "Listing SQL folders:"
-          Get-ChildItem "./sql" -Directory | ForEach-Object {
-            Write-Host " -> $($_.Name)"
+          Write-Host ""
+          Write-Host "======================================="
+          Write-Host "VALIDATING SQL FOLDERS"
+          Write-Host "======================================="
+
+          $folders = Get-ChildItem "./sql" -Directory
+
+          if ($folders.Count -eq 0) {
+            Write-Error "No database folders found!"
+            exit 1
           }
 
-  # ✅ JOB 2 — Approval + Deployment
+          foreach ($folder in $folders) {
+            Write-Host " -> $($folder.Name)"
+          }
+
+  # ==========================================
+  # JOB 2 — Production Deployment
+  # ==========================================
   deploy-production:
     name: Deploy to Production
     runs-on: self-hosted
     needs: validate
-    environment: Production   # ✅ Enables approval
+    environment: Production
 
     steps:
-      - name: Checkout Code
+
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Run Flyway Deployment
+      - name: Execute Flyway Migration
+        shell: pwsh
         env:
           DB_USER: ${{ secrets.SQLUSER }}
           DB_PASS: ${{ secrets.SQLPASSWORD }}
+
         run: |
 
-          Write-Host "Starting Multi-DB Deployment"
+          Write-Host ""
+          Write-Host "======================================="
+          Write-Host "STARTING MULTI-DB DEPLOYMENT"
+          Write-Host "======================================="
 
-          # ✅ Flyway path
+          # ======================================
+          # Flyway Installation Path
+          # ======================================
+
           $flyway = "C:\Users\tr117372\flyway\flyway\flyway-10.15.0\flyway.cmd"
 
-          # ✅ Database mapping
+          if (-not (Test-Path $flyway)) {
+            Write-Error "Flyway executable not found!"
+            exit 1
+          }
+
+          # ======================================
+          # SQL Server Port
+          # Replace 1433 with your actual port
+          # ======================================
+
+          $sqlPort = "1433"
+
+          # ======================================
+          # Database Mapping
+          # ======================================
+
           $dbMap = @{
             "TESTDB1" = ".\sql\TESTDB1"
             "TESTDB2" = ".\sql\TESTDB2"
             "TESTDB3" = ".\sql\TESTDB3"
           }
 
+          # ======================================
+          # Execute Flyway Deployment
+          # ======================================
+
           foreach ($db in $dbMap.Keys) {
 
             $path = $dbMap[$db]
 
-            # ✅ FINAL FIX — WORKS WITHOUT ADMIN
-            $url = "jdbc:sqlserver://localhost\\SQLDBMIG;databaseName=$db;encrypt=false;trustServerCertificate=true"
+            if (-not (Test-Path $path)) {
+              Write-Error "Migration path missing for $db"
+              exit 1
+            }
+
+            # ======================================
+            # JDBC URL USING TCP PORT
+            # ======================================
+
+            $url = "jdbc:sqlserver://localhost:$sqlPort;databaseName=$db;encrypt=false;trustServerCertificate=true;loginTimeout=30"
 
             Write-Host ""
-            Write-Host "--------------------------------------"
-            Write-Host "Deploying to Database: $db"
-            Write-Host "Scripts Path: $path"
-            Write-Host "--------------------------------------"
+            Write-Host "---------------------------------------"
+            Write-Host "DATABASE : $db"
+            Write-Host "LOCATION : $path"
+            Write-Host "---------------------------------------"
 
-            & $flyway -X `
+            & $flyway `
               -url="$url" `
               -user="$env:DB_USER" `
               -password="$env:DB_PASS" `
               -locations="filesystem:$path" `
               -validateOnMigrate=true `
+              -baselineOnMigrate=true `
+              -cleanDisabled=true `
+              -outOfOrder=false `
               migrate
 
             if ($LASTEXITCODE -ne 0) {
@@ -85,9 +141,14 @@ jobs:
               exit 1
             }
 
-            Write-Host "SUCCESS for $db"
+            Write-Host "SUCCESSFULLY DEPLOYED : $db"
           }
 
-      - name: Final Message
+      - name: Deployment Completed
+        shell: pwsh
         run: |
+
+          Write-Host ""
+          Write-Host "======================================="
           Write-Host "ALL DATABASES DEPLOYED SUCCESSFULLY"
+          Write-Host "======================================="
