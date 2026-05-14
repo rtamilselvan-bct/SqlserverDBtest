@@ -10,14 +10,13 @@ on:
 jobs:
 
   # ==========================================
-  # JOB 1 — Validate SQL Scripts
+  # JOB 1 — Validate SQL Structure
   # ==========================================
   validate:
     name: Validate SQL Scripts
     runs-on: self-hosted
 
     steps:
-
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -30,10 +29,7 @@ jobs:
             exit 1
           }
 
-          Write-Host ""
-          Write-Host "======================================="
-          Write-Host "VALIDATING SQL FOLDERS"
-          Write-Host "======================================="
+          Write-Host "SQL folder found."
 
           $folders = Get-ChildItem "./sql" -Directory
 
@@ -47,56 +43,71 @@ jobs:
           }
 
   # ==========================================
-  # JOB 2 — Deploy Databases
+  # JOB 2 — Flyway Deployment
   # ==========================================
   deploy-production:
-    name: Deploy to Production
+    name: Deploy Databases
     runs-on: self-hosted
     needs: validate
     environment: Production
 
     steps:
-
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Execute Flyway Migration
+      - name: Run Flyway Migration
         shell: powershell
-
         env:
           DB_USER: ${{ secrets.SQLUSER }}
           DB_PASS: ${{ secrets.SQLPASSWORD }}
 
         run: |
 
-          Write-Host ""
           Write-Host "======================================="
           Write-Host "STARTING MULTI-DB DEPLOYMENT"
           Write-Host "======================================="
 
           # ======================================
-          # Flyway Installation Path
+          # Flyway Path
           # ======================================
-
-          $flyway = "C:\Users\tr117372\flyway\flyway\flyway-10.15.0\flyway.cmd"
+          $flyway = "C:\Users\tr117372\flyway\flyway-10.15.0\flyway.cmd"
 
           if (-not (Test-Path $flyway)) {
-            Write-Error "Flyway executable not found!"
+            Write-Error "Flyway not found!"
             exit 1
           }
 
           # ======================================
-          # SQL Server TCP Port
-          # Replace if your SQL Server uses
-          # a different TCP port
+          # SQL SERVER CONFIG (IMPORTANT FIX)
           # ======================================
+          $server = "localhost"
 
+          # IMPORTANT:
+          # Replace this with ACTUAL SQL PORT from SQL Server
+          # If port is NULL, you MUST set a real one (e.g., 49172 or 1433 after config fix)
           $sqlPort = "1433"
 
           # ======================================
-          # Database Mapping
+          # CHECK CONNECTION BEFORE FLYWAY
           # ======================================
+          Write-Host "Checking SQL Server connectivity..."
 
+          $test = Test-NetConnection -ComputerName $server -Port $sqlPort -WarningAction SilentlyContinue
+
+          if (-not $test.TcpTestSucceeded) {
+            Write-Error "SQL Server NOT reachable on $server:$sqlPort"
+            Write-Host "Fix required:"
+            Write-Host "1. Enable TCP/IP in SQL Server Configuration Manager"
+            Write-Host "2. Set fixed port OR use correct dynamic port"
+            Write-Host "3. Restart SQL Server service"
+            exit 1
+          }
+
+          Write-Host "SQL Server connection OK."
+
+          # ======================================
+          # DATABASE MAPPING
+          # ======================================
           $dbMap = @{
             "TESTDB1" = ".\sql\TESTDB1"
             "TESTDB2" = ".\sql\TESTDB2"
@@ -104,28 +115,23 @@ jobs:
           }
 
           # ======================================
-          # Execute Deployment
+          # DEPLOY LOOP
           # ======================================
-
           foreach ($db in $dbMap.Keys) {
 
             $path = $dbMap[$db]
 
             if (-not (Test-Path $path)) {
-              Write-Error "Migration folder missing for $db"
+              Write-Error "Missing folder for $db"
               exit 1
             }
 
-            # ======================================
-            # JDBC URL
-            # ======================================
-
-            $url = "jdbc:sqlserver://localhost`:$sqlPort;databaseName=$db;encrypt=false;trustServerCertificate=true;loginTimeout=30"
+            $url = "jdbc:sqlserver://$server`:$sqlPort;databaseName=$db;encrypt=false;trustServerCertificate=true;loginTimeout=30"
 
             Write-Host ""
             Write-Host "--------------------------------------"
-            Write-Host "Deploying Database : $db"
-            Write-Host "Scripts Path       : $path"
+            Write-Host "Deploying DB : $db"
+            Write-Host "Path         : $path"
             Write-Host "--------------------------------------"
 
             & $flyway `
@@ -136,28 +142,19 @@ jobs:
               -validateOnMigrate=true `
               -baselineOnMigrate=true `
               -cleanDisabled=true `
-              -outOfOrder=false `
               migrate
 
             if ($LASTEXITCODE -ne 0) {
-
-              Write-Host ""
-              Write-Host "======================================="
-              Write-Host "DEPLOYMENT FAILED FOR $db"
-              Write-Host "======================================="
-
+              Write-Error "FAILED for $db"
               exit 1
             }
 
-            Write-Host ""
-            Write-Host "SUCCESSFULLY DEPLOYED : $db"
+            Write-Host "SUCCESS: $db"
           }
 
       - name: Deployment Completed
         shell: powershell
         run: |
-
-          Write-Host ""
           Write-Host "======================================="
           Write-Host "ALL DATABASES DEPLOYED SUCCESSFULLY"
           Write-Host "======================================="
