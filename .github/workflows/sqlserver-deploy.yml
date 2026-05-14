@@ -18,14 +18,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Check SQL Folders
+      - name: Check SQL Folder
         run: |
           if (-not (Test-Path "./sql")) {
-            Write-Error "sql folder missing!"
+            Write-Error "❌ sql folder missing!"
             exit 1
           }
 
-          Write-Host "Listing SQL folders:"
+          Write-Host "📂 Listing SQL folders:"
           Get-ChildItem "./sql" -Directory | ForEach-Object {
             Write-Host " -> $($_.Name)"
           }
@@ -35,26 +35,24 @@ jobs:
     name: Deploy to Production
     runs-on: self-hosted
     needs: validate
-    environment: Production   # ✅ approval required
+    environment: Production   # ✅ Manager Approval Required
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Deploy to Multiple Databases
+      - name: Run Flyway Deployment
         env:
           DB_USER: ${{ secrets.SQLUSER }}
           DB_PASS: ${{ secrets.SQLPASSWORD }}
         run: |
 
-          # ✅ Local Flyway path
+          Write-Host "🚀 Starting Multi-DB Deployment..."
+
+          # ✅ Local Flyway Path
           $flyway = "C:\Users\tr117372\flyway\flyway\flyway-10.15.0\flyway.cmd"
 
-          # ✅ Your SQL Server (INSTANCE BASED - NO PORT)
-          $server = "BCTCL-DL5420628"
-          $instance = "SQLDBMIG"
-
-          # ✅ DB → Script mapping
+          # ✅ DATABASE → SCRIPT MAPPING
           $dbMap = @{
             "TESTDB1" = ".\sql\TESTDB1"
             "TESTDB2" = ".\sql\TESTDB2"
@@ -65,13 +63,13 @@ jobs:
 
             $path = $dbMap[$db]
 
-            # ✅ FINAL JDBC URL (NO ADMIN REQUIRED)
-            $url = "jdbc:sqlserver://$server;instanceName=$instance;databaseName=$db;encrypt=false;trustServerCertificate=true"
+            # ✅ FINAL CONNECTION STRING (NO ADMIN REQUIRED ✅)
+            $url = "jdbc:sqlserver://localhost\\SQLDBMIG;databaseName=$db;encrypt=false;trustServerCertificate=true"
 
             Write-Host ""
             Write-Host "======================================"
             Write-Host "Deploying to Database: $db"
-            Write-Host "Scripts Path: $path"
+            Write-Host "Scripts location: $path"
             Write-Host "======================================"
 
             & $flyway -X `
@@ -92,4 +90,5 @@ jobs:
 
       - name: Final Message
         run: |
+          Write-Host ""
           Write-Host "✅ ALL DATABASES DEPLOYED SUCCESSFULLY"
