@@ -10,19 +10,19 @@ on:
 jobs:
 
   validate:
-    name: Validate SQL Scripts
+    name: Validate SQL Structure
     runs-on: self-hosted
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Validate SQL Structure
+      - name: Validate SQL Folders
         shell: powershell
         run: |
 
           Write-Host "======================================="
-          Write-Host "VALIDATING SQL FOLDERS"
+          Write-Host "VALIDATING SQL STRUCTURE"
           Write-Host "======================================="
 
           if (-not (Test-Path "./sql")) {
@@ -38,11 +38,11 @@ jobs:
           }
 
           $folders | ForEach-Object {
-            Write-Host "Found DB Folder: $($_.Name)"
+            Write-Host ("Found DB Folder: {0}" -f $_.Name)
           }
 
   deploy:
-    name: Deploy Databases via Flyway
+    name: Deploy Databases (Flyway)
     runs-on: self-hosted
     needs: validate
 
@@ -76,20 +76,20 @@ jobs:
           Write-Host "Using Flyway: $flyway"
 
           # =========================
-          # SQL SERVER (FIXED - STABLE MODE)
+          # SQL SERVER (STABLE MODE)
           # =========================
           $server = "localhost"
           $sqlPort = 52969
 
-          Write-Host "Using SQL Server: $server:$sqlPort"
+          Write-Host ("Using SQL Server: {0}:{1}" -f $server, $sqlPort)
 
           # =========================
-          # TEST CONNECTION
+          # CONNECTION TEST
           # =========================
           $test = Test-NetConnection -ComputerName $server -Port $sqlPort -WarningAction SilentlyContinue
 
           if (-not $test.TcpTestSucceeded) {
-            Write-Error "SQL Server NOT reachable on localhost:$sqlPort"
+            Write-Error ("SQL Server NOT reachable on {0}:{1}" -f $server, $sqlPort)
             exit 1
           }
 
@@ -112,7 +112,7 @@ jobs:
             $path = $dbMap[$db]
 
             if (-not (Test-Path $path)) {
-              Write-Error "Missing folder for $db"
+              Write-Error ("Missing folder for {0}" -f $db)
               exit 1
             }
 
@@ -120,8 +120,8 @@ jobs:
 
             Write-Host ""
             Write-Host "---------------------------------------"
-            Write-Host "Deploying Database : $db"
-            Write-Host "Path               : $path"
+            Write-Host ("Deploying Database : {0}" -f $db)
+            Write-Host ("Path              : {0}" -f $path)
             Write-Host "---------------------------------------"
 
             & $flyway `
@@ -136,11 +136,11 @@ jobs:
               migrate
 
             if ($LASTEXITCODE -ne 0) {
-              Write-Error "Flyway migration FAILED for $db"
+              Write-Error ("Flyway migration FAILED for {0}" -f $db)
               exit 1
             }
 
-            Write-Host "SUCCESS: $db deployed successfully."
+            Write-Host ("SUCCESS: {0} deployed successfully." -f $db)
           }
 
       - name: Deployment Completed
