@@ -26,7 +26,7 @@ jobs:
 
           foreach ($folder in $folders) {
             if (-not (Test-Path "./sql/$folder")) {
-              Write-Error "❌ Missing folder: sql/$folder"
+              Write-Error "Missing folder: sql/$folder"
               exit 1
             }
 
@@ -35,12 +35,12 @@ jobs:
 
             foreach ($file in $files) {
               if ($file.Name -notmatch '^V\d+__.*\.sql$') {
-                Write-Warning "⚠️ Invalid: $($file.Name)"
+                Write-Warning "Invalid: $($file.Name)"
               }
             }
           }
 
-          Write-Host "✅ Validation done"
+          Write-Host "Validation done"
 
 
   # ✅ 2. DEPLOY DEV
@@ -61,7 +61,7 @@ jobs:
         run: |
           $conn = Test-NetConnection -ComputerName "$env:SQL_SERVER" -Port 1433
           if (-not $conn.TcpTestSucceeded) {
-            Write-Error "❌ SQL not reachable"
+            Write-Error "SQL not reachable"
             exit 1
           }
           Write-Host "✅ SQL reachable"
@@ -80,7 +80,7 @@ jobs:
           $flyway = Get-ChildItem -Path $dir -Recurse -Filter "flyway.cmd" | Select-Object -First 1
 
           if (-not $flyway) {
-            Write-Error "❌ flyway.cmd not found"
+            Write-Error "flyway.cmd not found"
             Get-ChildItem -Recurse $dir
             exit 1
           }
@@ -99,7 +99,7 @@ jobs:
           $server = "$env:SQL_SERVER"
 
           if (-not (Test-Path $flyway)) {
-            Write-Error "❌ Flyway not found"
+            Write-Error "Flyway not found"
             exit 1
           }
 
@@ -114,7 +114,7 @@ jobs:
             cmd /c "`"$flyway`" migrate -url=$url -user=$user -password=$pass -locations=filesystem:sql/$db -connectRetries=10"
 
             if ($LASTEXITCODE -ne 0) {
-              Write-Error "❌ DEV failed: $db"
+              Write-Error "DEV failed: $db"
               exit 1
             }
 
@@ -161,7 +161,7 @@ jobs:
           $flyway = Get-ChildItem -Path $dir -Recurse -Filter "flyway.cmd" | Select-Object -First 1
 
           if (-not $flyway) {
-            Write-Error "❌ flyway.cmd not found"
+            Write-Error "flyway.cmd not found"
             exit 1
           }
 
@@ -177,7 +177,7 @@ jobs:
           $server = "$env:SQL_SERVER"
 
           if (-not (Test-Path $flyway)) {
-            Write-Error "❌ Flyway not found"
+            Write-Error "Flyway not found"
             exit 1
           }
 
@@ -185,18 +185,18 @@ jobs:
 
           foreach ($db in $dbs) {
 
-            Write-Host "🔥 PROD DEPLOY: $db"
+            Write-Host "PROD DEPLOY: $db"
 
             $url = "jdbc:sqlserver://$server;databaseName=$db;encrypt=true;trustServerCertificate=true"
 
             cmd /c "`"$flyway`" migrate -url=$url -user=$user -password=$pass -locations=filesystem:sql/$db"
 
             if ($LASTEXITCODE -ne 0) {
-              Write-Error "❌ PROD failed: $db"
+              Write-Error "PROD failed: $db"
               exit 1
             }
 
-            Write-Host "✅ PROD deployed: $db"
+            Write-Host "PROD deployed: $db"
           }
 
       - name: Deployment Summary
