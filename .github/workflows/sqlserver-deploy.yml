@@ -20,11 +20,9 @@ jobs:
       - name: Validate SQL Folders
         shell: powershell
         run: |
-          Write-Host "======================================="
           Write-Host "VALIDATING SQL STRUCTURE"
-          Write-Host "======================================="
 
-          $folders = @("TESTDB1", "TESTDB2", "TESTDB3")
+          $folders = @("TESTDB1","TESTDB2","TESTDB3")
 
           foreach ($folder in $folders) {
             if (-not (Test-Path "./sql/$folder")) {
@@ -33,19 +31,19 @@ jobs:
             }
 
             $files = Get-ChildItem "./sql/$folder" -Filter "*.sql"
-            Write-Host "$folder -> $($files.Count) files found"
+            Write-Host "$folder -> $($files.Count) files"
 
             foreach ($file in $files) {
               if ($file.Name -notmatch '^V\d+__.*\.sql$') {
-                Write-Warning "⚠️ Invalid naming: $($file.Name)"
+                Write-Warning "⚠️ Invalid: $($file.Name)"
               }
             }
           }
 
-          Write-Host "✅ Validation completed"
+          Write-Host "✅ Validation done"
 
 
-  # ✅ 2. DEPLOY TO DEV
+  # ✅ 2. DEPLOY DEV
   deploy-dev:
     name: Deploy to Development
     runs-on: self-hosted
@@ -56,21 +54,19 @@ jobs:
       SQL_SERVER: "BCTCL-DL5420628"
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # ✅ Test SQL connectivity
       - name: Test SQL Connection
         shell: powershell
         run: |
           $conn = Test-NetConnection -ComputerName "$env:SQL_SERVER" -Port 1433
-          if ($conn.TcpTestSucceeded -eq $false) {
-            Write-Error "❌ Cannot connect to SQL Server"
+          if (-not $conn.TcpTestSucceeded) {
+            Write-Error "❌ SQL not reachable"
             exit 1
           }
-          Write-Host "✅ SQL connection OK"
+          Write-Host "✅ SQL reachable"
 
-      # ✅ Download Flyway (FIXED: uses .exe)
+      # ✅ Download Flyway (FIXED)
       - name: Download Flyway
         shell: powershell
         run: |
@@ -81,10 +77,10 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile $zip
           Expand-Archive $zip -DestinationPath $dir -Force
 
-          $flyway = Get-ChildItem -Path $dir -Recurse -Filter "flyway.exe" | Select-Object -First 1
+          $flyway = Get-ChildItem -Path $dir -Recurse -Filter "flyway.cmd" | Select-Object -First 1
 
           if (-not $flyway) {
-            Write-Error "❌ flyway.exe not found"
+            Write-Error "❌ flyway.cmd not found"
             Get-ChildItem -Recurse $dir
             exit 1
           }
@@ -93,17 +89,17 @@ jobs:
 
           Write-Host "✅ Flyway ready: $($flyway.FullName)"
 
-      # ✅ Run DEV migrations
+      # ✅ Run DEV migration (FIXED EXECUTION)
       - name: Run DEV Flyway Migration
         shell: powershell
         run: |
           $flyway = "$env:FLYWAY_CMD"
-          $user   = '${{ secrets.SQLUSER }}'
-          $pass   = '${{ secrets.SQLPASSWORD }}'
+          $user = '${{ secrets.SQLUSER }}'
+          $pass = '${{ secrets.SQLPASSWORD }}'
           $server = "$env:SQL_SERVER"
 
           if (-not (Test-Path $flyway)) {
-            Write-Error "❌ Flyway not found at $flyway"
+            Write-Error "❌ Flyway not found"
             exit 1
           }
 
@@ -111,22 +107,14 @@ jobs:
 
           foreach ($db in $dbs) {
 
-            Write-Host "======================================="
             Write-Host "🚀 DEV DEPLOY: $db"
-            Write-Host "======================================="
 
             $url = "jdbc:sqlserver://$server;databaseName=$db;encrypt=true;trustServerCertificate=true"
 
-            & "$flyway" migrate `
-              -url="$url" `
-              -user="$user" `
-              -password="$pass" `
-              -locations="filesystem:sql/$db" `
-              -connectRetries=10 `
-              -connectRetriesInterval=5
+            cmd /c "`"$flyway`" migrate -url=$url -user=$user -password=$pass -locations=filesystem:sql/$db -connectRetries=10"
 
             if ($LASTEXITCODE -ne 0) {
-              Write-Error "❌ DEV deployment failed: $db"
+              Write-Error "❌ DEV failed: $db"
               exit 1
             }
 
@@ -141,14 +129,13 @@ jobs:
     needs: deploy-dev
 
     environment:
-      name: Production   # ✅ triggers approval
+      name: Production
 
     steps:
-      - name: Waiting for approval
-        run: echo "⏸ Waiting for manager approval..."
+      - run: echo "⏸ Waiting for manager approval..."
 
 
-  # ✅ 4. DEPLOY TO PROD
+  # ✅ 4. DEPLOY PROD
   deploy-prod:
     name: Deploy to Production
     runs-on: self-hosted
@@ -158,8 +145,7 @@ jobs:
       SQL_SERVER: "BCTCL-DL5420628"
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       # ✅ Download Flyway again (job isolation safe)
       - name: Download Flyway
@@ -172,26 +158,26 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile $zip
           Expand-Archive $zip -DestinationPath $dir -Force
 
-          $flyway = Get-ChildItem -Path $dir -Recurse -Filter "flyway.exe" | Select-Object -First 1
+          $flyway = Get-ChildItem -Path $dir -Recurse -Filter "flyway.cmd" | Select-Object -First 1
 
           if (-not $flyway) {
-            Write-Error "❌ flyway.exe not found"
+            Write-Error "❌ flyway.cmd not found"
             exit 1
           }
 
           echo "FLYWAY_CMD=$($flyway.FullName)" >> $env:GITHUB_ENV
 
-      # ✅ Run PROD migrations
+      # ✅ Run PROD migration (FIXED)
       - name: Run PROD Flyway Migration
         shell: powershell
         run: |
           $flyway = "$env:FLYWAY_CMD"
-          $user   = '${{ secrets.SQLUSER }}'
-          $pass   = '${{ secrets.SQLPASSWORD }}'
+          $user = '${{ secrets.SQLUSER }}'
+          $pass = '${{ secrets.SQLPASSWORD }}'
           $server = "$env:SQL_SERVER"
 
           if (-not (Test-Path $flyway)) {
-            Write-Error "❌ Flyway not found at $flyway"
+            Write-Error "❌ Flyway not found"
             exit 1
           }
 
@@ -199,20 +185,14 @@ jobs:
 
           foreach ($db in $dbs) {
 
-            Write-Host "======================================="
             Write-Host "🔥 PROD DEPLOY: $db"
-            Write-Host "======================================="
 
             $url = "jdbc:sqlserver://$server;databaseName=$db;encrypt=true;trustServerCertificate=true"
 
-            & "$flyway" migrate `
-              -url="$url" `
-              -user="$user" `
-              -password="$pass" `
-              -locations="filesystem:sql/$db"
+            cmd /c "`"$flyway`" migrate -url=$url -user=$user -password=$pass -locations=filesystem:sql/$db"
 
             if ($LASTEXITCODE -ne 0) {
-              Write-Error "❌ PROD deployment failed: $db"
+              Write-Error "❌ PROD failed: $db"
               exit 1
             }
 
@@ -222,9 +202,6 @@ jobs:
       - name: Deployment Summary
         shell: powershell
         run: |
-          Write-Host ""
-          Write-Host "======================================="
           Write-Host "✅ PRODUCTION DEPLOYMENT COMPLETE"
-          Write-Host "Server : $env:SQL_SERVER"
-          Write-Host "Time   : $(Get-Date)"
-          Write-Host "======================================="
+          Write-Host "Server: $env:SQL_SERVER"
+          Write-Host "Time: $(Get-Date)"
