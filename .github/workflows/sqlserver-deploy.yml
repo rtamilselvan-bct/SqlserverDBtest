@@ -33,13 +33,9 @@ jobs:
 
             $files = Get-ChildItem "./sql/$folder" -Filter "*.sql"
             Write-Host "$folder -> $($files.Count) SQL files"
-
-            $files | Sort-Object Name | ForEach-Object {
-              Write-Host "   $($_.Name)"
-            }
           }
 
-          Write-Host "All folders validated successfully"
+          Write-Host "All folders OK"
 
   deploy:
     name: Deploy All Databases
@@ -51,11 +47,11 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # ✅ Step 1: Test SQL Server Instance
-      - name: Test SQL Server Connection
+      # ✅ Step 1: Test Instance (NO PORT)
+      - name: Test SQL Server Instance
         shell: powershell
         run: |
-          Write-Host "Testing SQL Server instance (.\\SQLDBMIG)..."
+          Write-Host "Testing instance .\SQLDBMIG ..."
 
           $result = sqlcmd `
             -S ".\SQLDBMIG" `
@@ -63,24 +59,23 @@ jobs:
             -C `
             -b 2>&1
 
+          Write-Host $result
+
           if ($LASTEXITCODE -ne 0) {
-            Write-Error "Cannot connect to SQL Server instance .\SQLDBMIG"
+            Write-Error "Cannot connect to .\SQLDBMIG"
             exit 1
           }
 
-          Write-Host "SQL Server instance reachable"
+          Write-Host "Instance OK"
 
-      # ✅ Step 2: Test Credentials
+      # ✅ Step 2: Test Login
       - name: Test SQL Credentials
         shell: powershell
         run: |
-          Write-Host "Testing SQL credentials..."
-
           $user = '${{ secrets.SQLUSER }}'
           $pass = '${{ secrets.SQLPASSWORD }}'
 
-          Write-Host "Username: $user"
-          Write-Host "Password length: $($pass.Length)"
+          Write-Host "Testing login for $user"
 
           $result = sqlcmd `
             -S ".\SQLDBMIG" `
@@ -88,60 +83,58 @@ jobs:
             -U "$user" `
             -P "$pass" `
             -C `
-            -Q "SELECT 'LOGIN OK', @@SERVERNAME" `
+            -Q "SELECT 'LOGIN OK'" `
             -b 2>&1
 
-          Write-Host "Result: $result"
+          Write-Host $result
 
           if ($LASTEXITCODE -ne 0) {
-            Write-Error "Credentials FAILED"
+            Write-Error "Login FAILED"
             exit 1
           }
 
-          Write-Host "Credentials OK"
+          Write-Host "Login OK"
 
-      # ✅ Step 3: Deploy ALL databases (loop)
-      - name: Deploy All Databases
+      # ✅ Step 3: Deploy DBs (NO TCP / NO PORT)
+      - name: Deploy Databases
         shell: powershell
         run: |
           $flyway = "C:\Users\tr117372\flyway\flyway\flyway-10.15.0\flyway.cmd"
           $user   = '${{ secrets.SQLUSER }}'
           $pass   = '${{ secrets.SQLPASSWORD }}'
 
-          $databases = @("TESTDB1", "TESTDB2", "TESTDB3")
+          $databases = @("TESTDB1","TESTDB2","TESTDB3")
 
           foreach ($db in $databases) {
 
             Write-Host "---------------------------------------"
-            Write-Host "Deploying Database : $db"
+            Write-Host "Deploying: $db"
             Write-Host "---------------------------------------"
 
-            $url = "jdbc:sqlserver://localhost;instanceName=SQLDBMIG;databaseName=$db;encrypt=false;trustServerCertificate=true"
+            # ✅ KEY FIX → use instance (not port)
+            $url = "jdbc:sqlserver://.\SQLDBMIG;databaseName=$db;encrypt=false;trustServerCertificate=true"
 
             & $flyway `
               -url="$url" `
               -user="$user" `
               -password="$pass" `
               -locations="filesystem:.\sql\$db" `
-              -validateOnMigrate=true `
               -baselineOnMigrate=true `
+              -validateOnMigrate=true `
               migrate
 
             if ($LASTEXITCODE -ne 0) {
-              Write-Error "$db DEPLOYMENT FAILED"
+              Write-Error "$db FAILED"
               exit 1
             }
 
-            Write-Host "$db DEPLOYED SUCCESSFULLY"
+            Write-Host "$db SUCCESS"
           }
 
-      # ✅ Step 4: Done
       - name: Deployment Complete
         shell: powershell
         run: |
           Write-Host "======================================="
-          Write-Host "ALL DATABASES DEPLOYED SUCCESSFULLY"
-          Write-Host "Instance : .\SQLDBMIG"
-          Write-Host "Branch   : ${{ github.ref_name }}"
-          Write-Host "User     : ${{ github.actor }}"
+          Write-Host "ALL DATABASES DEPLOYED"
+          Write-Host "Instance: .\SQLDBMIG"
           Write-Host "======================================="
