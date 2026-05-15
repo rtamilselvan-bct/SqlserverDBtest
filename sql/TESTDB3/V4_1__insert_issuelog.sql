@@ -1,3 +1,4 @@
+--========================
 INSERT INTO IssueLogs
 (IssueTitle, IssueDescription, Severity, Status, CreatedBy, AssignedTo)
 VALUES
