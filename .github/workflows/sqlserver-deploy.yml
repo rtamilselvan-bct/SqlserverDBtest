@@ -112,7 +112,7 @@ jobs:
             Write-Host "---------------------------------------"
 
             # ✅ KEY FIX → use instance (not port)
-            $url = "jdbc:sqlserver://.\SQLDBMIG;databaseName=$db;encrypt=false;trustServerCertificate=true"
+           $url = "jdbc:sqlserver://localhost\\SQLDBMIG;databaseName=$db;encrypt=false;trustServerCertificate=true"
 
             & $flyway `
               -url="$url" `
