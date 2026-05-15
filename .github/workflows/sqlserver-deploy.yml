@@ -7,7 +7,6 @@ on:
   workflow_dispatch:
 
 jobs:
-
   validate:
     name: Validate SQL Structure
     runs-on: self-hosted
@@ -45,6 +44,9 @@ jobs:
     name: Deploy All Databases
     runs-on: self-hosted
     needs: validate
+    # Defining the server as a variable for the job to avoid repetition
+    env:
+      SQL_SERVER: "BCTCL-DL5420628"
 
     steps:
       - name: Checkout Repository
@@ -54,10 +56,10 @@ jobs:
       - name: Test SQL Server Instance
         shell: powershell
         run: |
-          Write-Host "Testing SQL Server instance (.\\SQLDBMIG)..."
+          Write-Host "Testing SQL Server instance ($env:SQL_SERVER)..."
 
           $result = sqlcmd `
-            -S ".\SQLDBMIG" `
+            -S "$env:SQL_SERVER" `
             -Q "SELECT @@SERVERNAME" `
             -C `
             -b 2>&1
@@ -65,7 +67,7 @@ jobs:
           Write-Host $result
 
           if ($LASTEXITCODE -ne 0) {
-            Write-Error "Cannot connect to SQL Server instance .\SQLDBMIG"
+            Write-Error "Cannot connect to SQL Server instance $env:SQL_SERVER"
             exit 1
           }
 
@@ -81,7 +83,7 @@ jobs:
           Write-Host "Testing login for user: $user"
 
           $result = sqlcmd `
-            -S ".\SQLDBMIG" `
+            -S "$env:SQL_SERVER" `
             -d "master" `
             -U "$user" `
             -P "$pass" `
@@ -104,7 +106,7 @@ jobs:
         run: |
           $user   = '${{ secrets.SQLUSER }}'
           $pass   = '${{ secrets.SQLPASSWORD }}'
-          $server = ".\SQLDBMIG"
+          $server = "$env:SQL_SERVER"
 
           $databases = @("TESTDB1","TESTDB2","TESTDB3")
 
@@ -143,7 +145,7 @@ jobs:
         run: |
           Write-Host "======================================="
           Write-Host "✅ ALL DATABASES DEPLOYED SUCCESSFULLY"
-          Write-Host "Instance : .\SQLDBMIG"
+          Write-Host "Instance : $env:SQL_SERVER"
           Write-Host "Branch   : ${{ github.ref_name }}"
           Write-Host "User     : ${{ github.actor }}"
           Write-Host "======================================="
