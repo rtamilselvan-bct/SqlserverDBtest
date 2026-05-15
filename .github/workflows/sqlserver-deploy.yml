@@ -24,18 +24,22 @@ jobs:
           Write-Host "======================================="
 
           $folders = @("TESTDB1", "TESTDB2", "TESTDB3")
+
           foreach ($folder in $folders) {
             if (-not (Test-Path "./sql/$folder")) {
               Write-Error "Missing folder: sql/$folder"
               exit 1
             }
+
             $files = Get-ChildItem "./sql/$folder" -Filter "*.sql"
             Write-Host "$folder -> $($files.Count) SQL files"
+
             $files | Sort-Object Name | ForEach-Object {
               Write-Host "   $($_.Name)"
             }
           }
-          Write-Host "All folders OK"
+
+          Write-Host "All folders validated successfully"
 
   deploy:
     name: Deploy All Databases
@@ -47,28 +51,31 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # ── Step 1: Test Connection ──────────────────────────
+      # ✅ Step 1: Test SQL Server Instance
       - name: Test SQL Server Connection
         shell: powershell
         run: |
-          $test = Test-NetConnection `
-            -ComputerName localhost `
-            -Port 52969 `
-            -WarningAction SilentlyContinue
+          Write-Host "Testing SQL Server instance (.\\SQLDBMIG)..."
 
-          if (-not $test.TcpTestSucceeded) {
-            Write-Error "SQL Server NOT reachable on localhost:52969"
+          $result = sqlcmd `
+            -S ".\SQLDBMIG" `
+            -Q "SELECT @@SERVERNAME" `
+            -C `
+            -b 2>&1
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Cannot connect to SQL Server instance .\SQLDBMIG"
             exit 1
           }
-          Write-Host "SQL Server reachable on port 52969"
 
-      # ── Step 2: Test Credentials ─────────────────────────
+          Write-Host "SQL Server instance reachable"
+
+      # ✅ Step 2: Test Credentials
       - name: Test SQL Credentials
         shell: powershell
         run: |
           Write-Host "Testing SQL credentials..."
 
-          # ✅ Pass secrets directly — no env block
           $user = '${{ secrets.SQLUSER }}'
           $pass = '${{ secrets.SQLPASSWORD }}'
 
@@ -76,115 +83,65 @@ jobs:
           Write-Host "Password length: $($pass.Length)"
 
           $result = sqlcmd `
-            -S "localhost,52969" `
+            -S ".\SQLDBMIG" `
             -d "master" `
             -U "$user" `
             -P "$pass" `
+            -C `
             -Q "SELECT 'LOGIN OK', @@SERVERNAME" `
             -b 2>&1
 
           Write-Host "Result: $result"
 
           if ($LASTEXITCODE -ne 0) {
-            Write-Error "Credentials FAILED - Error 18456"
-            Write-Host "Check SQLUSER and SQLPASSWORD secrets!"
+            Write-Error "Credentials FAILED"
             exit 1
           }
+
           Write-Host "Credentials OK"
 
-      # ── Step 3: Deploy TESTDB1 ───────────────────────────
-      - name: Deploy TESTDB1
+      # ✅ Step 3: Deploy ALL databases (loop)
+      - name: Deploy All Databases
         shell: powershell
         run: |
           $flyway = "C:\Users\tr117372\flyway\flyway\flyway-10.15.0\flyway.cmd"
           $user   = '${{ secrets.SQLUSER }}'
           $pass   = '${{ secrets.SQLPASSWORD }}'
-          $url    = "jdbc:sqlserver://localhost:52969;databaseName=TESTDB1;encrypt=false;trustServerCertificate=true"
 
-          Write-Host "Deploying TESTDB1..."
-          Write-Host "URL: $url"
-          Write-Host "User: $user"
+          $databases = @("TESTDB1", "TESTDB2", "TESTDB3")
 
-          & $flyway `
-            -url="$url" `
-            -user="$user" `
-            -password="$pass" `
-            -locations="filesystem:.\sql\TESTDB1" `
-            -validateOnMigrate=true `
-            -baselineOnMigrate=true `
-            migrate
+          foreach ($db in $databases) {
 
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "TESTDB1 FAILED"
-            exit 1
+            Write-Host "---------------------------------------"
+            Write-Host "Deploying Database : $db"
+            Write-Host "---------------------------------------"
+
+            $url = "jdbc:sqlserver://localhost;instanceName=SQLDBMIG;databaseName=$db;encrypt=false;trustServerCertificate=true"
+
+            & $flyway `
+              -url="$url" `
+              -user="$user" `
+              -password="$pass" `
+              -locations="filesystem:.\sql\$db" `
+              -validateOnMigrate=true `
+              -baselineOnMigrate=true `
+              migrate
+
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "$db DEPLOYMENT FAILED"
+              exit 1
+            }
+
+            Write-Host "$db DEPLOYED SUCCESSFULLY"
           }
-          Write-Host "TESTDB1 SUCCESS"
 
-      # ── Step 4: Deploy TESTDB2 ───────────────────────────
-      - name: Deploy TESTDB2
-        shell: powershell
-        run: |
-          $flyway = "C:\Users\tr117372\flyway\flyway\flyway-10.15.0\flyway.cmd"
-          $user   = '${{ secrets.SQLUSER }}'
-          $pass   = '${{ secrets.SQLPASSWORD }}'
-          $url    = "jdbc:sqlserver://localhost:52969;databaseName=TESTDB2;encrypt=false;trustServerCertificate=true"
-
-          Write-Host "Deploying TESTDB2..."
-          Write-Host "URL: $url"
-          Write-Host "User: $user"
-
-          & $flyway `
-            -url="$url" `
-            -user="$user" `
-            -password="$pass" `
-            -locations="filesystem:.\sql\TESTDB2" `
-            -validateOnMigrate=true `
-            -baselineOnMigrate=true `
-            migrate
-
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "TESTDB2 FAILED"
-            exit 1
-          }
-          Write-Host "TESTDB2 SUCCESS"
-
-      # ── Step 5: Deploy TESTDB3 ───────────────────────────
-      - name: Deploy TESTDB3
-        shell: powershell
-        run: |
-          $flyway = "C:\Users\tr117372\flyway\flyway\flyway-10.15.0\flyway.cmd"
-          $user   = '${{ secrets.SQLUSER }}'
-          $pass   = '${{ secrets.SQLPASSWORD }}'
-          $url    = "jdbc:sqlserver://localhost:52969;databaseName=TESTDB3;encrypt=false;trustServerCertificate=true"
-
-          Write-Host "Deploying TESTDB3..."
-          Write-Host "URL: $url"
-          Write-Host "User: $user"
-
-          & $flyway `
-            -url="$url" `
-            -user="$user" `
-            -password="$pass" `
-            -locations="filesystem:.\sql\TESTDB3" `
-            -validateOnMigrate=true `
-            -baselineOnMigrate=true `
-            migrate
-
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "TESTDB3 FAILED"
-            exit 1
-          }
-          Write-Host "TESTDB3 SUCCESS"
-
-      # ── Step 6: Done ─────────────────────────────────────
+      # ✅ Step 4: Done
       - name: Deployment Complete
         shell: powershell
         run: |
           Write-Host "======================================="
-          Write-Host "ALL 3 DATABASES DEPLOYED SUCCESSFULLY"
-          Write-Host "TESTDB1 - DONE"
-          Write-Host "TESTDB2 - DONE"
-          Write-Host "TESTDB3 - DONE"
-          Write-Host "Branch : ${{ github.ref_name }}"
-          Write-Host "By     : ${{ github.actor }}"
+          Write-Host "ALL DATABASES DEPLOYED SUCCESSFULLY"
+          Write-Host "Instance : .\SQLDBMIG"
+          Write-Host "Branch   : ${{ github.ref_name }}"
+          Write-Host "User     : ${{ github.actor }}"
           Write-Host "======================================="
