@@ -7,6 +7,8 @@ on:
   workflow_dispatch:
 
 jobs:
+
+  # ✅ 1. VALIDATION
   validate:
     name: Validate SQL Structure
     runs-on: self-hosted
@@ -32,79 +34,176 @@ jobs:
 
             $files = Get-ChildItem "./sql/$folder" -Filter "*.sql"
             Write-Host "$folder -> $($files.Count) files found"
+
+            foreach ($file in $files) {
+              if ($file.Name -notmatch '^V\d+__.*\.sql$') {
+                Write-Warning "Invalid naming: $($file.Name)"
+              }
+            }
           }
 
           Write-Host "Validation completed"
 
-  deploy:
-    name: Deploy All Databases
+
+  # ✅ 2. DOWNLOAD FLYWAY (SHARED STEP)
+  setup-flyway:
+    name: Setup Flyway
     runs-on: self-hosted
     needs: validate
+
+    outputs:
+      flyway_cmd: ${{ steps.setpath.outputs.flyway_cmd }}
+
+    steps:
+      - name: Download Flyway
+        id: setpath
+        shell: powershell
+        run: |
+          $flywayUrl = "https://repo1.maven.org/maven2/org/flywaydb/flyway-commandline/10.10.0/flyway-commandline-10.10.0-windows-x64.zip"
+          $zipPath = "$env:RUNNER_TEMP\flyway.zip"
+          $extractPath = "$env:RUNNER_TEMP\flyway"
+
+          Invoke-WebRequest -Uri $flywayUrl -OutFile $zipPath
+          Expand-Archive $zipPath -DestinationPath $extractPath -Force
+
+          $flywayExe = Get-ChildItem -Path $extractPath -Recurse -Filter "flyway.cmd" | Select-Object -First 1
+
+          if (-not $flywayExe) {
+            Write-Error "Flyway not found"
+            exit 1
+          }
+
+          echo "flyway_cmd=$($flywayExe.FullName)" >> $env:GITHUB_OUTPUT
+
+
+  # ✅ 3. DEPLOY TO DEVELOPMENT
+  deploy-dev:
+    name: Deploy to Development
+    runs-on: self-hosted
+    needs: setup-flyway
+    if: github.ref == 'refs/heads/Development'
+
     env:
-      # Your specific server name
       SQL_SERVER: "BCTCL-DL5420628"
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # ✅ Step 1: Test Connectivity to Server
-      - name: Test SQL Server Connection
+      - name: Test SQL Connection
         shell: powershell
         run: |
-          Write-Host "Testing connection to $env:SQL_SERVER on port 1433..."
-          $connection = Test-NetConnection -ComputerName "$env:SQL_SERVER" -Port 1433
-          
-          if ($connection.TcpTestSucceeded -eq $false) {
-            Write-Error "Cannot reach SQL Server $env:SQL_SERVER on port 1433. Check firewall."
+          $conn = Test-NetConnection -ComputerName "$env:SQL_SERVER" -Port 1433
+          if ($conn.TcpTestSucceeded -eq $false) {
+            Write-Error "Cannot connect to SQL Server"
             exit 1
           }
-          Write-Host "Network connection successful"
+          Write-Host "✅ SQL connection OK"
 
-      # ✅ Step 2: Deploy All Databases using Flyway
-      - name: Flyway Migration
+      - name: Run DEV Flyway Migration
         shell: powershell
         run: |
+          $flyway = "${{ needs.setup-flyway.outputs.flyway_cmd }}"
           $user   = '${{ secrets.SQLUSER }}'
           $pass   = '${{ secrets.SQLPASSWORD }}'
           $server = "$env:SQL_SERVER"
-          
-          # List of databases to migrate
-          $databases = @("TESTDB1", "TESTDB2", "TESTDB3")
 
-          foreach ($db in $databases) {
-            Write-Host "---------------------------------------"
-            Write-Host "RUNNING MIGRATION FOR: $db"
-            Write-Host "---------------------------------------"
+          $dbs = @("TESTDB1","TESTDB2","TESTDB3")
 
-            # Constructing the JDBC URL for SQL Server
-            # encrypt=true and trustServerCertificate=true are often required for internal servers
-            $jdbcUrl = "jdbc:sqlserver://$server;databaseName=$db;encrypt=true;trustServerCertificate=true"
+          foreach ($db in $dbs) {
+            Write-Host "DEV DEPLOY: $db"
 
-            # Execute Flyway
-            # -locations points to the specific subfolder for this DB
-            flyway migrate `
-              -url="$jdbcUrl" `
+            $url = "jdbc:sqlserver://$server;databaseName=$db;encrypt=true;trustServerCertificate=true"
+
+            & $flyway migrate `
+              -url="$url" `
               -user="$user" `
               -password="$pass" `
               -locations="filesystem:sql/$db" `
               -connectRetries=10
 
             if ($LASTEXITCODE -ne 0) {
-              Write-Error "Flyway migration FAILED for database: $db"
+              Write-Error "DEV deployment failed: $db"
               exit 1
             }
-            
-            Write-Host "Successfully migrated $db"
+
+            Write-Host "DEV deployed: $db"
           }
 
-      # ✅ Step 3: Summary
+
+  # ✅ 4. APPROVAL STEP (IMPORTANT)
+  approval:
+    name: Manager Approval Required
+    runs-on: self-hosted
+    needs: deploy-dev
+
+    environment:
+      name: Production   # ✅ THIS triggers approval in GitHub
+
+    steps:
+      - name: Waiting for approval
+        run: echo "Awaiting manager approval..."
+
+
+  # ✅ 5. DEPLOY TO PRODUCTION
+  deploy-prod:
+    name: Deploy to Production
+    runs-on: self-hosted
+    needs: approval
+
+    env:
+      SQL_SERVER: "BCTCL-DL5420628"
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Flyway Again (isolated job)
+        shell: powershell
+        run: |
+          $flywayUrl = "https://repo1.maven.org/maven2/org/flywaydb/flyway-commandline/10.10.0/flyway-commandline-10.10.0-windows-x64.zip"
+          $zipPath = "$env:RUNNER_TEMP\flyway.zip"
+          $extractPath = "$env:RUNNER_TEMP\flyway"
+
+          Invoke-WebRequest -Uri $flywayUrl -OutFile $zipPath
+          Expand-Archive $zipPath -DestinationPath $extractPath -Force
+          $flywayExe = Get-ChildItem -Path $extractPath -Recurse -Filter "flyway.cmd" | Select-Object -First 1
+          echo "FLYWAY_CMD=$($flywayExe.FullName)" >> $env:GITHUB_ENV
+
+      - name: Run PROD Flyway Migration
+        shell: powershell
+        run: |
+          $flyway = "$env:FLYWAY_CMD"
+          $user   = '${{ secrets.SQLUSER }}'
+          $pass   = '${{ secrets.SQLPASSWORD }}'
+          $server = "$env:SQL_SERVER"
+
+          $dbs = @("TESTDB1","TESTDB2","TESTDB3")
+
+          foreach ($db in $dbs) {
+            Write-Host "PROD DEPLOY: $db"
+
+            $url = "jdbc:sqlserver://$server;databaseName=$db;encrypt=true;trustServerCertificate=true"
+
+            & $flyway migrate `
+              -url="$url" `
+              -user="$user" `
+              -password="$pass" `
+              -locations="filesystem:sql/$db"
+
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "PROD deployment failed: $db"
+              exit 1
+            }
+
+            Write-Host "PROD deployed: $db"
+          }
+
       - name: Deployment Summary
         shell: powershell
         run: |
           Write-Host "======================================="
-          Write-Host "✅ DEPLOYMENT COMPLETE"
+          Write-Host "PRODUCTION DEPLOYMENT COMPLETE"
           Write-Host "Server : $env:SQL_SERVER"
-          Write-Host "Status : All Flyway migrations finished"
           Write-Host "Time   : $(Get-Date)"
           Write-Host "======================================="
